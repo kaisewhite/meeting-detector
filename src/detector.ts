@@ -48,6 +48,15 @@ export class MeetingDetector extends EventEmitter {
         if (line.trim()) {
           try {
             const signal = this.parseSignal(line);
+            
+            // Suppress afplay process signals
+            if (signal.process?.toLowerCase().includes('afplay')) {
+              if (this.options.debug) {
+                console.log('[MeetingDetector] Suppressing afplay signal');
+              }
+              continue;
+            }
+            
             if (this.options.debug) {
               console.log('[MeetingDetector] Parsed signal:', signal);
             }
