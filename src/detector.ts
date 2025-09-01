@@ -130,10 +130,17 @@ export class MeetingDetector extends EventEmitter {
   private parseSignal(line: string): MeetingSignal {
     const signal = JSON.parse(line) as Record<string, any>;
     
+    // Use transformed app name as service if the original service is a system service like 'microphone' or 'camera'
+    const originalService = signal.service || '';
+    const transformedService = this.transformAppName(signal.front_app, signal.process);
+    const finalService = (originalService === 'microphone' || originalService === 'camera' || !originalService) 
+      ? transformedService 
+      : originalService;
+    
     return {
       event: signal.event,
       timestamp: signal.timestamp,
-      service: signal.service || this.transformAppName(signal.front_app, signal.process),
+      service: finalService,
       verdict: signal.verdict || '',
       process: signal.process || '',
       pid: signal.pid || '',
