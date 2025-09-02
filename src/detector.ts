@@ -7,7 +7,6 @@ import { MeetingSignal, MeetingDetectorOptions, MeetingEventCallback, ErrorEvent
 export class MeetingDetector extends EventEmitter {
   private process?: ChildProcess;
   private options: Required<MeetingDetectorOptions>;
-  private recentSignals: Map<string, { timestamp: Date; signal: MeetingSignal }> = new Map();
 
   constructor(options: MeetingDetectorOptions = {}) {
     super();
@@ -48,27 +47,10 @@ export class MeetingDetector extends EventEmitter {
         if (line.trim()) {
           try {
             const signal = this.parseSignal(line);
-            
-            // Suppress unwanted process signals
-            const processName = signal.process?.toLowerCase() || '';
-            if (processName.includes('afplay') || 
-                processName.includes('sirincservice') || 
-                processName.includes('wavelink')) {
-              // Completely suppress - no logging at all
-              continue;
-            }
-            
             if (this.options.debug) {
               console.log('[MeetingDetector] Parsed signal:', signal);
             }
-            
-            // Check for duplicate signals within 1 minute window
-            if (!this.isDuplicateSignal(signal)) {
-              this.emit('meeting', signal);
-              this.trackSignal(signal);
-            } else if (this.options.debug) {
-              console.log('[MeetingDetector] Skipping duplicate signal for PID:', signal.pid);
-            }
+            this.emit('meeting', signal);
           } catch (error) {
             if (this.options.debug) {
               console.log('[MeetingDetector] Failed to parse line:', line);
@@ -210,37 +192,6 @@ export class MeetingDetector extends EventEmitter {
     } else {
       // Fallback to front_app if no match
       return frontApp || 'Meeting App';
-    }
-  }
-
-  private isDuplicateSignal(signal: MeetingSignal): boolean {
-    if (!signal.pid) return false;
-
-    const key = `${signal.pid}-${signal.service}-${signal.verdict}`;
-    const existing = this.recentSignals.get(key);
-    
-    if (!existing) return false;
-
-    // Check if the signal is within 1 minute (60000ms) of the previous one
-    const timeDiff = Date.now() - existing.timestamp.getTime();
-    return timeDiff < 60000;
-  }
-
-  private trackSignal(signal: MeetingSignal): void {
-    if (!signal.pid) return;
-
-    const key = `${signal.pid}-${signal.service}-${signal.verdict}`;
-    this.recentSignals.set(key, {
-      timestamp: new Date(),
-      signal
-    });
-
-    // Clean up old signals (older than 2 minutes)
-    const cutoffTime = Date.now() - 120000;
-    for (const [key, entry] of this.recentSignals.entries()) {
-      if (entry.timestamp.getTime() < cutoffTime) {
-        this.recentSignals.delete(key);
-      }
     }
   }
 }
