@@ -51,10 +51,10 @@ export class MeetingDetector extends EventEmitter {
             
             // Suppress unwanted process signals
             const processName = signal.process?.toLowerCase() || '';
-            if (processName.includes('afplay') || processName.includes('sirincservice')) {
-              if (this.options.debug) {
-                console.log('[MeetingDetector] Suppressing signal from:', signal.process);
-              }
+            if (processName.includes('afplay') || 
+                processName.includes('sirincservice') || 
+                processName.includes('wavelink')) {
+              // Completely suppress - no logging at all
               continue;
             }
             
