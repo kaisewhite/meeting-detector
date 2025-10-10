@@ -35,6 +35,36 @@ front_app() {
   /usr/bin/osascript -e 'tell application "System Events" to get name of first process whose frontmost is true' 2>/dev/null || echo ""
 }
 
+# --- util: get active window title ---
+window_title() {
+  /usr/bin/osascript -e 'tell application "System Events" to get title of front window of first process whose frontmost is true' 2>/dev/null || echo ""
+}
+
+# --- util: get parent PID ---
+parent_pid() {
+  local pid="$1"
+  if [[ -n "$pid" ]]; then
+    ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ' || echo ""
+  else
+    echo ""
+  fi
+}
+
+# --- util: get process path ---
+process_path() {
+  local pid="$1"
+  if [[ -n "$pid" ]]; then
+    ps -o command= -p "$pid" 2>/dev/null | awk '{print $1}' || echo ""
+  else
+    echo ""
+  fi
+}
+
+# --- util: get session ID ---
+session_id() {
+  who -m 2>/dev/null | awk '{print $2}' | head -1 || echo ""
+}
+
 # --- util: quick camera-in-use heuristic (VDCAssistant/AppleCameraAssistant presence) ---
 camera_active() {
   if pgrep -xq "VDCAssistant" || pgrep -xq "AppleCameraAssistant"; then
@@ -107,11 +137,15 @@ while IFS= read -r line; do
   # Parse target PID - when we find this, we have enough info to emit
   if [[ "$line" =~ target_token=\{pid:([0-9]+) ]]; then
     current_pid="${BASH_REMATCH[1]}"
-    # Get process name from PID
+    # Get process info from PID
     if [[ -n "$current_pid" ]]; then
       current_app_full=$(ps -p "$current_pid" -o comm= 2>/dev/null | tail -1)
       # Extract just the app name from full path (e.g., "Google Chrome Helper" from long path)
       current_app=$(basename "$current_app_full" 2>/dev/null || echo "$current_app_full")
+      
+      # Get additional process details
+      current_parent_pid=$(parent_pid "$current_pid")
+      current_process_path=$(process_path "$current_pid")
     fi
     
     # --- we now have complete info, check if we should emit ---
@@ -119,6 +153,8 @@ while IFS= read -r line; do
       ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
       fg_app="$(front_app)"
       cam_now="$(camera_active)"
+      win_title="$(window_title)"
+      sess_id="$(session_id)"
       
       # Normalize app name to reduce Teams/Chrome helper noise
       normalized_app=$(normalize_app "$current_app")
@@ -145,7 +181,11 @@ while IFS= read -r line; do
           verdict="$current_verdict" \
           process="$current_app" \
           pid="$current_pid" \
+          parent_pid="$current_parent_pid" \
+          process_path="$current_process_path" \
           front_app="$fg_app" \
+          window_title="$win_title" \
+          session_id="$sess_id" \
           camera_active="$cam_now"
         
         # Update previous state
@@ -164,6 +204,8 @@ while IFS= read -r line; do
       current_pid=""
       current_app=""
       current_verdict=""
+      current_parent_pid=""
+      current_process_path=""
     fi
   fi
 done

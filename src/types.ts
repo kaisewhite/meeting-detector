@@ -5,7 +5,11 @@ export interface MeetingSignal {
   verdict: 'requested' | 'allowed' | 'denied' | '';
   process: string;
   pid: string;
+  parent_pid: string;
+  process_path: string;
   front_app: string;
+  window_title: string;
+  session_id: string;
   camera_active: boolean;
 }
 

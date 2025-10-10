@@ -47,6 +47,12 @@ export class MeetingDetector extends EventEmitter {
         if (line.trim()) {
           try {
             const signal = this.parseSignal(line);
+            if (this.shouldIgnoreSignal(signal)) {
+              if (this.options.debug) {
+                console.log('[MeetingDetector] Ignoring signal:', signal);
+              }
+              continue;
+            }
             if (this.options.debug) {
               console.log('[MeetingDetector] Parsed signal:', signal);
             }
@@ -119,6 +125,24 @@ export class MeetingDetector extends EventEmitter {
     this.on('error', callback);
   }
 
+  private shouldIgnoreSignal(signal: MeetingSignal): boolean {
+    const ignoredProcesses = new Set(['afplay', 'systemsoundserverd']);
+    const ignoredServices = new Set(['electron', 'terminal']);
+
+    const processName = signal.process?.toLowerCase() || '';
+    const serviceName = signal.service?.toLowerCase() || '';
+
+    if (ignoredProcesses.has(processName)) {
+      return true;
+    }
+
+    if (ignoredServices.has(serviceName)) {
+      return true;
+    }
+
+    return false;
+  }
+
   private parseSignal(line: string): MeetingSignal {
     const signal = JSON.parse(line) as Record<string, any>;
     
@@ -136,7 +160,11 @@ export class MeetingDetector extends EventEmitter {
       verdict: signal.verdict || '',
       process: signal.process || '',
       pid: signal.pid || '',
+      parent_pid: signal.parent_pid || '',
+      process_path: signal.process_path || '',
       front_app: signal.front_app || '',
+      window_title: signal.window_title || '',
+      session_id: signal.session_id || '',
       camera_active: signal.camera_active === 'true' || signal.camera_active === true
     };
   }
