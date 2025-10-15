@@ -24,12 +24,19 @@ export interface MeetingDetectorOptions {
    * @default './meeting-detect.sh'
    */
   scriptPath?: string;
-  
+
   /**
    * Enable debug logging
    * @default false
    */
   debug?: boolean;
+
+  /**
+   * Session deduplication window in milliseconds
+   * Signals from the same session within this window will be ignored
+   * @default 60000 (60 seconds)
+   */
+  sessionDeduplicationMs?: number;
 }
 
 export type MeetingEventCallback = (signal: MeetingSignal) => void;

@@ -4,22 +4,29 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { MeetingSignal, MeetingDetectorOptions, MeetingEventCallback, ErrorEventCallback } from './types.js';
 
+interface SessionInfo {
+  lastSeen: number;
+  signal: MeetingSignal;
+}
+
 export class MeetingDetector extends EventEmitter {
   private process?: ChildProcess;
   private options: Required<MeetingDetectorOptions>;
+  private activeSessions: Map<string, SessionInfo> = new Map();
 
   constructor(options: MeetingDetectorOptions = {}) {
     super();
-    
+
     // Get the absolute path to the script relative to this package
     const defaultScriptPath = options.scriptPath || join(
       dirname(fileURLToPath(import.meta.url)),
       '../meeting-detect.sh'
     );
-    
+
     this.options = {
       scriptPath: defaultScriptPath,
-      debug: options.debug || false
+      debug: options.debug || false,
+      sessionDeduplicationMs: options.sessionDeduplicationMs || 60000
     };
   }
 
@@ -42,7 +49,7 @@ export class MeetingDetector extends EventEmitter {
 
     this.process.stdout?.on('data', (data: Buffer) => {
       const lines = data.toString().trim().split('\n');
-      
+
       for (const line of lines) {
         if (line.trim()) {
           try {
@@ -53,6 +60,14 @@ export class MeetingDetector extends EventEmitter {
               }
               continue;
             }
+
+            if (this.isDuplicateSession(signal)) {
+              if (this.options.debug) {
+                console.log('[MeetingDetector] Skipping duplicate session:', signal);
+              }
+              continue;
+            }
+
             if (this.options.debug) {
               console.log('[MeetingDetector] Parsed signal:', signal);
             }
@@ -97,7 +112,10 @@ export class MeetingDetector extends EventEmitter {
     if (this.process) {
       this.process.kill('SIGTERM');
       this.process = undefined;
-      
+
+      // Clear active sessions when stopping
+      this.activeSessions.clear();
+
       if (this.options.debug) {
         console.log('[MeetingDetector] Stopped monitoring');
       }
@@ -126,7 +144,7 @@ export class MeetingDetector extends EventEmitter {
   }
 
   private shouldIgnoreSignal(signal: MeetingSignal): boolean {
-    const ignoredProcesses = new Set(['afplay', 'systemsoundserverd']);
+    const ignoredProcesses = new Set(['afplay', 'systemsoundserverd', 'electron helper']);
     const ignoredServices = new Set(['electron', 'terminal']);
 
     const processName = signal.process?.toLowerCase() || '';
@@ -141,6 +159,65 @@ export class MeetingDetector extends EventEmitter {
     }
 
     return false;
+  }
+
+  /**
+   * Generate a unique session key based on the signal properties
+   */
+  private getSessionKey(signal: MeetingSignal): string {
+    return `${signal.pid}:${signal.service}:${signal.front_app}`;
+  }
+
+  /**
+   * Check if this signal is a duplicate of an existing session
+   * Returns true if duplicate, false if new or expired session
+   */
+  private isDuplicateSession(signal: MeetingSignal): boolean {
+    const sessionKey = this.getSessionKey(signal);
+    const now = Date.now();
+    const existingSession = this.activeSessions.get(sessionKey);
+
+    // Clean up expired sessions periodically
+    this.cleanupExpiredSessions();
+
+    if (existingSession) {
+      const timeSinceLastSeen = now - existingSession.lastSeen;
+
+      if (timeSinceLastSeen < this.options.sessionDeduplicationMs) {
+        // Update last seen time for existing session
+        existingSession.lastSeen = now;
+        return true; // This is a duplicate
+      }
+    }
+
+    // New session or expired session - track it
+    this.activeSessions.set(sessionKey, {
+      lastSeen: now,
+      signal
+    });
+
+    return false; // This is not a duplicate
+  }
+
+  /**
+   * Clean up sessions that have expired
+   */
+  private cleanupExpiredSessions(): void {
+    const now = Date.now();
+    const expiredKeys: string[] = [];
+
+    for (const [key, session] of this.activeSessions.entries()) {
+      if (now - session.lastSeen > this.options.sessionDeduplicationMs) {
+        expiredKeys.push(key);
+      }
+    }
+
+    for (const key of expiredKeys) {
+      this.activeSessions.delete(key);
+      if (this.options.debug) {
+        console.log(`[MeetingDetector] Cleaned up expired session: ${key}`);
+      }
+    }
   }
 
   private parseSignal(line: string): MeetingSignal {
