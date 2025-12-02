@@ -143,19 +143,84 @@ export class MeetingDetector extends EventEmitter {
     this.on('error', callback);
   }
 
+  /**
+   * Comprehensive filtering to prevent false positives
+   * Filters out:
+   * - System processes (WebKit, SiriNCService, Chrome Helper, etc.)
+   * - Development tools (Electron, Terminal, Xcode)
+   * - Generic browser services (Chrome, Safari, Firefox)
+   * - Browser camera initialization (no window title + 'requested' verdict)
+   * - Google Meet signals without valid meeting URL patterns
+   */
   private shouldIgnoreSignal(signal: MeetingSignal): boolean {
-    const ignoredProcesses = new Set(['afplay', 'systemsoundserverd', 'electron helper']);
-    const ignoredServices = new Set(['electron', 'terminal']);
+    // System processes that should never trigger meeting detection
+    const systemProcessPatterns = [
+      'sirinc',           // SiriNCService
+      'afplay',           // macOS audio file player
+      'systemsoundserver', // System sound effects
+      'wavelink',         // Audio routing software
+      'granola helper',   // Screen recording helper
+      'webkit.gpu',       // WebKit GPU process
+      'webkit.networking', // WebKit networking
+      'chrome helper',    // Chrome helper processes (too generic)
+      'electron helper',  // Electron helper processes
+    ];
+
+    // Services/apps that are too generic or development-related
+    const genericServices = [
+      'electron',
+      'terminal',
+      'granola',
+      'finder',
+      'xcode',
+      'tips',
+      'google chrome',   // Generic Chrome service (not a specific meeting)
+      'safari',          // Generic Safari service
+      'firefox',         // Generic Firefox service
+      'microsoft edge',  // Generic Edge service
+    ];
 
     const processName = signal.process?.toLowerCase() || '';
     const serviceName = signal.service?.toLowerCase() || '';
 
-    if (ignoredProcesses.has(processName)) {
+    // Filter by process name patterns (partial match for flexibility)
+    if (systemProcessPatterns.some(pattern => processName.includes(pattern))) {
       return true;
     }
 
-    if (ignoredServices.has(serviceName)) {
+    // Filter by exact generic service names
+    if (genericServices.includes(serviceName)) {
       return true;
+    }
+
+    // Camera initialization filter: if verdict is 'requested' and window_title is empty,
+    // it's likely just camera initialization, not an actual meeting
+    // This applies to ALL apps to prevent false positives during camera setup
+    if (signal.verdict === 'requested' && (!signal.window_title || signal.window_title.trim() === '')) {
+      // Exception: if camera is actively being used (not just requested), allow it through
+      // This helps distinguish between "requesting permission" vs "actively in a call"
+      if (!signal.camera_active) {
+        return true;
+      }
+    }
+
+    // For Google Meet specifically: require window title to contain meeting URL patterns
+    // This prevents false positives from just opening Chrome with camera permissions
+    if (serviceName === 'google meet') {
+      const windowTitle = signal.window_title || '';
+
+      // Valid Google Meet windows should contain:
+      // - meet.google.com URL
+      // - "Meet - " prefix in title
+      // - Valid meeting code pattern (e.g., abc-defg-hij)
+      const hasValidMeetTitle =
+        windowTitle.includes('meet.google.com') ||
+        windowTitle.includes('Meet - ') ||
+        /[a-z]{3}-[a-z]{4}-[a-z]{3}/.test(windowTitle); // Meeting code pattern
+
+      if (!hasValidMeetTitle) {
+        return true;
+      }
     }
 
     return false;
